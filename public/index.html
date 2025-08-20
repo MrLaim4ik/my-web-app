@@ -35,9 +35,10 @@
 
     const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
+    // ✅ Автоопределение протокола (wss:// или ws://)
     connectBtn.onclick = () => {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${window.location.host}`;
+      const wsUrl = `${wsProtocol}//${window.location.host}`; // ❌ НЕ используем :3000
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -48,6 +49,7 @@
 
       ws.onmessage = async (event) => {
         const data = JSON.parse(event.data);
+
         if (data.type === 'offer') {
           await handleOffer(data);
         } else if (data.type === 'answer') {
@@ -57,14 +59,24 @@
         }
       };
 
-      ws.onerror = () => status.textContent = '❌ Ошибка подключения';
-      ws.onclose = () => status.textContent = '🔌 Соединение закрыто';
+      ws.onerror = (err) => {
+        status.textContent = '❌ Ошибка подключения';
+        console.error('Ошибка WebSocket:', err);
+      };
+
+      ws.onclose = () => {
+        status.textContent = '🔌 Соединение закрыто';
+      };
     };
 
     callBtn.onclick = async () => {
       try {
         pc = new RTCPeerConnection(config);
-        pc.onicecandidate = (e) => e.candidate && ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+          }
+        };
 
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -84,12 +96,17 @@
         status.textContent = '📞 Звонок начат...';
       } catch (err) {
         status.textContent = 'Ошибка: ' + err.message;
+        console.error(err);
       }
     };
 
     async function handleOffer(offer) {
       pc = new RTCPeerConnection(config);
-      pc.onicecandidate = (e) => e.candidate && ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+        }
+      };
 
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -110,10 +127,11 @@
     }
 
     hangupBtn.onclick = () => {
-      pc?.close();
-      localStream?.getTracks().forEach(t => t.stop());
+      if (pc) pc.close();
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
       pc = null;
       localStream = null;
+
       hangupBtn.disabled = true;
       callBtn.disabled = false;
       status.textContent = '⏸ Звонок завершён';
