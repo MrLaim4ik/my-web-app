@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Голосовой чат</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f4; }
+    h1 { color: #333; }
+    button { font-size: 18px; padding: 12px 24px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
+    #connectBtn { background: #007bff; color: white; }
+    #callBtn { background: #28a745; color: white; }
+    #hangupBtn { background: #dc3545; color: white; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #status { margin: 20px; font-size: 18px; font-weight: bold; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>🎤 Голосовой чат</h1>
+  <p>Подключись и поговори напрямую через браузер</p>
+  <button id="connectBtn">Подключиться</button>
+  <button id="callBtn" disabled>Позвонить</button>
+  <button id="hangupBtn" disabled>Завершить</button>
+  <p id="status">Готов к подключению</p>
+
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const callBtn = document.getElementById('callBtn');
+    const hangupBtn = document.getElementById('hangupBtn');
+    const status = document.getElementById('status');
+
+    let ws;
+    let pc;
+    let localStream;
+
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    connectBtn.onclick = () => {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        status.textContent = '✅ Подключено к серверу';
+        connectBtn.disabled = true;
+        callBtn.disabled = false;
+      };
+
+      ws.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'offer') {
+          await handleOffer(data);
+        } else if (data.type === 'answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(data));
+        } else if (data.type === 'candidate') {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      };
+
+      ws.onerror = () => status.textContent = '❌ Ошибка подключения';
+      ws.onclose = () => status.textContent = '🔌 Соединение закрыто';
+    };
+
+    callBtn.onclick = async () => {
+      try {
+        pc = new RTCPeerConnection(config);
+        pc.onicecandidate = (e) => e.candidate && ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        pc.ontrack = (e) => {
+          const remoteAudio = new Audio();
+          remoteAudio.srcObject = e.streams[0];
+          remoteAudio.play().catch(e => console.warn('Автовоспроизведение заблокировано', e));
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify(offer));
+
+        callBtn.disabled = true;
+        hangupBtn.disabled = false;
+        status.textContent = '📞 Звонок начат...';
+      } catch (err) {
+        status.textContent = 'Ошибка: ' + err.message;
+      }
+    };
+
+    async function handleOffer(offer) {
+      pc = new RTCPeerConnection(config);
+      pc.onicecandidate = (e) => e.candidate && ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate }));
+
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+      pc.ontrack = (e) => {
+        const remoteAudio = new Audio();
+        remoteAudio.srcObject = e.streams[0];
+        remoteAudio.play().catch(e => console.warn('Автовоспроизведение заблокировано', e));
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify(answer));
+
+      hangupBtn.disabled = false;
+      status.textContent = '🟢 Разговор идёт!';
+    }
+
+    hangupBtn.onclick = () => {
+      pc?.close();
+      localStream?.getTracks().forEach(t => t.stop());
+      pc = null;
+      localStream = null;
+      hangupBtn.disabled = true;
+      callBtn.disabled = false;
+      status.textContent = '⏸ Звонок завершён';
+    };
+  </script>
+</body>
+</html>
